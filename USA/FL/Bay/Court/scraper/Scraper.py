@@ -11,7 +11,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException, TimeoutException
 
-from common.captcha.benchmark.BenchmarkAdditionSolver import CaptchaSolver
+#from common.captcha.benchmark.BenchmarkAdditionSolver import CaptchaSolver
 from common.pii import Pii
 from common.record import Charge, ChargeBuilder
 import utils.ScraperUtils as ScraperUtils
@@ -50,7 +50,7 @@ if os.getenv('DOCKERIZED') == 'true':
 else:
     driver = webdriver.Firefox(options=ffx_profile)
 
-captcha_solver = CaptchaSolver(out_dir=output_captchas)
+#captcha_solver = CaptchaSolver(out_dir=output_captchas)
 
 
 def main(argv):
@@ -284,28 +284,20 @@ def search_portal(case_number):
         # Get Captcha. This is kinda nasty, but if there's no Captcha, then
         # this will throw (which is a good thing in this case) and we can
         # move on with processing.
-        captcha_image_elem = driver.find_element_by_xpath('//*/img[@alt="Captcha"]')
-        captcha_buffer = captcha_image_elem.screenshot_as_png
-        if FLAGS.solve_captchas:
-            solved_captcha = captcha_solver.solve_captcha(captcha_buffer)
-            captcha_textbox = driver.find_element_by_xpath('//*/input[@name="captcha"]')
-            captcha_textbox.click()
-            captcha_textbox.send_keys(solved_captcha.answer)
+        captcha_image_elem = driver.find_element_by_xpath('//*/div[@class="g-recaptcha"]')
 
-            # Do search
-            search_button = driver.find_element_by_id('searchButton')
-            search_button.click()
-        else:
-            print(f"Captcha encountered trying to view case ID {case_number}.")
-            print("Please solve the captcha and click the search button to proceed.")
-            while True:
-                try:
-                    WebDriverWait(driver, 6 * 60 * 60).until(
-                        lambda x: case_number in driver.title )
-                    print("continuing...")
-                    break
-                except TimeoutException:
-                    print("still waiting for user to solve the captcha...")
+        # TODO:Add captcha solver here
+
+        print(f"Captcha encountered trying to view case ID {case_number}.")
+        print("Please solve the captcha and click the search button to proceed.")
+        while True:
+            try:
+                WebDriverWait(driver, 6 * 60 * 60).until(
+                    lambda x: case_number in driver.title )
+                print("continuing...")
+                break
+            except TimeoutException:
+                print("still waiting for user to solve the captcha...")
 
     except NoSuchElementException:
         # No captcha on the page, continue.
