@@ -297,6 +297,7 @@ def search_portal(case_number):
                 result = recaptchasolver.recaptcha(sitekey=recaptchav2_sitekey, url=search_page)
             except ApiException as e:
                 print(f"TwoCaptcha failure; exiting. Failure: {e}")
+                driver.quit()
                 exit(1)
 
             print(f"Captcha solver results: {str(result)}")
