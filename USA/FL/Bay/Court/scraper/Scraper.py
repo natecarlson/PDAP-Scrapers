@@ -17,6 +17,9 @@ from common.record import Charge, ChargeBuilder
 import utils.ScraperUtils as ScraperUtils
 from utils.ScraperUtils import BenchmarkRecordBuilder
 
+# captcha solver
+from twocaptcha import TwoCaptcha
+
 FLAGS = flags.FLAGS
 flags.DEFINE_string('portal_base', 'https://court.baycoclerk.com/BenchmarkWeb2/', 'Base of the portal to scrape.')
 flags.DEFINE_string('state', 'FL', 'State code we are scraping.', short_name='s')
@@ -25,22 +28,24 @@ flags.DEFINE_string('county', 'Bay', 'County we are scraping.', short_name='c')
 flags.DEFINE_integer('start_year', 2000, 'Year at which to start scraping.', short_name='y')
 flags.DEFINE_integer('end_year', datetime.now().year, 'Year at which to end scraping', short_name='e')
 
-flags.DEFINE_bool('solve_captchas', False, 'Whether to solve captchas.')
+flags.DEFINE_bool('solve_captchas', True, 'Whether to solve captchas.')
 flags.DEFINE_enum('save_attachments', 'none', ['none', 'filing', 'all'], 'Which attachments to save.', short_name='a')
 flags.DEFINE_string('output', 'bay-county-scraped.csv', 'Relative filename for our CSV', short_name='o')
 
 flags.DEFINE_integer('missing_thresh', 5, 'Number of consecutive missing records after which we move to the next year', short_name='t')
 flags.DEFINE_integer('connect_thresh', 10, 'Number of failed connection attempts allowed before giving up')
 
- # TODO(mcsaucy): move everything over to absl.logging so we get this for free
+flags.DEFINE_string('captcha_api_key', 'fake key', '2Captcha API Key')
+
+# TODO(mcsaucy): move everything over to absl.logging so we get this for free
 flags.DEFINE_bool('verbose', False, 'Whether to be noisy.')
 
 output_attachments = os.path.join(os.getcwd(), 'attachments')
-output_captchas = os.path.join(os.getcwd(), 'captcha')
 
 ffx_profile = webdriver.FirefoxOptions()
 # Automatically dismiss unexpected alerts.
 ffx_profile.set_capability('unexpectedAlertBehaviour', 'dismiss')
+
 
 if os.getenv('DOCKERIZED') == 'true':
     # If running through docker-compose, use the standalone firefox container. See: docker-compose.yml#firefox
@@ -49,8 +54,6 @@ if os.getenv('DOCKERIZED') == 'true':
        desired_capabilities=ffx_profile.to_capabilities())
 else:
     driver = webdriver.Firefox(options=ffx_profile)
-
-#captcha_solver = CaptchaSolver(out_dir=output_captchas)
 
 
 def main(argv):
@@ -268,7 +271,8 @@ def search_portal(case_number):
     :return: A set of case number(s).
     """
     # Load portal search page
-    load_page(f"{FLAGS.portal_base}/Home.aspx/Search", 'Search', FLAGS.verbose)
+    search_page=f"{FLAGS.portal_base}/Home.aspx/Search"
+    load_page(search_page, 'Search', FLAGS.verbose)
     # Give some time for the captcha to load, as it does not load instantly.
     time.sleep(0.8)
 
@@ -284,20 +288,34 @@ def search_portal(case_number):
         # Get Captcha. This is kinda nasty, but if there's no Captcha, then
         # this will throw (which is a good thing in this case) and we can
         # move on with processing.
-        captcha_image_elem = driver.find_element_by_xpath('//*/div[@class="g-recaptcha"]')
+        recaptchav2_sitekey = driver.find_element_by_xpath('//*/div[@class="g-recaptcha"]').get_attribute("data-sitekey")
+        
+        if FLAGS.solve_captchas:
+            # TODO: print -> logger
+            print(f"Solving captcha with data-sitekey of: {recaptchav2_sitekey}")
+            # TODO: Initialize this earlier, dummy.
+            recaptchasolver = TwoCaptcha(FLAGS.captcha_api_key)
+            result = recaptchasolver.recaptcha(sitekey=recaptchav2_sitekey, url=search_page)
 
-        # TODO:Add captcha solver here
+            print(f"Captcha solver results: {str(result)}")
 
-        print(f"Captcha encountered trying to view case ID {case_number}.")
-        print("Please solve the captcha and click the search button to proceed.")
-        while True:
-            try:
-                WebDriverWait(driver, 6 * 60 * 60).until(
-                    lambda x: case_number in driver.title )
-                print("continuing...")
-                break
-            except TimeoutException:
-                print("still waiting for user to solve the captcha...")
+            # Fill in the field
+            driver.execute_script('document.getElementById("g-recaptcha-response").innerHTML = "{}";'.format(result["code"]))
+
+            # Do search
+            search_button = driver.find_element_by_id('searchButton')
+            search_button.click()
+        else:
+            print(f"Captcha encountered trying to view case ID {case_number}.")
+            print("Please solve the captcha and click the search button to proceed.")
+            while True:
+                try:
+                    WebDriverWait(driver, 6 * 60 * 60).until(
+                        lambda x: case_number in driver.title )
+                    print("continuing...")
+                    break
+                except TimeoutException:
+                    print("still waiting for user to solve the captcha...")
 
     except NoSuchElementException:
         # No captcha on the page, continue.
@@ -318,6 +336,7 @@ def search_portal(case_number):
                 # Clicking search did not change the page. This could be because of a failed captcha attempt.
                 try:
                     # Check if 'Invalid Captcha' dialog is showing
+                    # Confirmed that this is still what is returned for a bad captcha!
                     driver.find_element_by_xpath(
                         '//div[@class="alert alert-error"]')
                     print("Captcha was solved incorrectly")

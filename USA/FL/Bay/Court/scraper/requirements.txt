@@ -14,3 +14,4 @@ beautifulsoup4
 pandas
 doltpy==2.0.14
 Scrapy==2.5.1
+2captcha-python
