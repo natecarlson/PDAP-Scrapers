@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 import time
 import os
 import uuid
@@ -11,6 +12,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException, TimeoutException
 
+p = Path(__file__).resolve().parents[5]
+sys.path.insert(1, str(p))
 #from common.captcha.benchmark.BenchmarkAdditionSolver import CaptchaSolver
 from common.pii import Pii
 from common.record import Charge, ChargeBuilder
