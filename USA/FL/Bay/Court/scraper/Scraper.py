@@ -138,9 +138,9 @@ def scrape_record(case_number):
                 driver.refresh()
 
     # Get relevant page content
-    summary_table_col1 = driver.find_elements_by_xpath('//*[@id="summaryAccordionCollapse"]/table/tbody/tr/td[1]/dl/dd')
-    summary_table_col2 = driver.find_elements_by_xpath('//*[@id="summaryAccordionCollapse"]/table/tbody/tr/td[2]/dl/dd')
-    summary_table_col3 = driver.find_elements_by_xpath('//*[@id="summaryAccordionCollapse"]/table/tbody/tr/td[3]/dl/dd')
+    summary_table_col1 = driver.find_elements(by=By.XPATH, value='//*[@id="summaryAccordionCollapse"]/table/tbody/tr/td[1]/dl/dd')
+    summary_table_col2 = driver.find_elements(by=By.XPATH, value='//*[@id="summaryAccordionCollapse"]/table/tbody/tr/td[2]/dl/dd')
+    summary_table_col3 = driver.find_elements(by=By.XPATH, value='//*[@id="summaryAccordionCollapse"]/table/tbody/tr/td[3]/dl/dd')
 
     # Wait for court dockets to load
     for i in range(FLAGS.connect_thresh):
@@ -152,12 +152,11 @@ def scrape_record(case_number):
             else:
                 driver.refresh()
 
-    charges_table = driver.find_elements_by_xpath('//*[@id="gridCharges"]/tbody/tr')
-    docket_public_defender = driver.find_elements_by_xpath(
-        "//*[contains(text(), 'COURT APPOINTED ATTORNEY') and contains(text(), 'ASSIGNED')]")
-    docket_attorney = driver.find_elements_by_xpath("//*[contains(text(), 'DEFENSE') and contains(text(), 'ASSIGNED')]")
-    docket_pleas = driver.find_elements_by_xpath("//*[contains(text(), 'PLEA OF')]")
-    docket_attachments = driver.find_elements_by_class_name('casedocketimage')
+    charges_table = driver.find_elements(by=By.XPATH, value='//*[@id="gridCharges"]/tbody/tr')
+    docket_public_defender = driver.find_elements(by=By.XPATH, value="//*[contains(text(), 'COURT APPOINTED ATTORNEY') and contains(text(), 'ASSIGNED')]")
+    docket_attorney = driver.find_elements(by=By.XPATH, value="//*[contains(text(), 'DEFENSE') and contains(text(), 'ASSIGNED')]")
+    docket_pleas = driver.find_elements(by=By.XPATH, value="//*[contains(text(), 'PLEA OF')]")
+    docket_attachments = driver.find_elements(by=By.CLASS_NAME, value='casedocketimage')
 
     r = BenchmarkRecordBuilder()
     r.id = str(uuid.uuid4())
@@ -187,7 +186,7 @@ def scrape_record(case_number):
     # Todo(OscarVanL): This could be parallelized to speed up scraping if save-attachments is set to 'all'.
     if FLAGS.save_attachments:
         for attachment_link in docket_attachments:
-            attachment_text = attachment_link.find_element_by_xpath('./../../td[3]').text.strip()
+            attachment_text = attachment_link.find_element(by=By.XPATH, value='./../../td[3]').text.strip()
             if FLAGS.save_attachments == 'filing':
                 if not ('CITATION FILED' in attachment_text or 'CASE FILED' in attachment_text):
                     # Attachment is not a filing, don't download it.
@@ -198,7 +197,7 @@ def scrape_record(case_number):
     Charges = {}
     for charge in charges_table:
         charge_builder = ChargeBuilder()
-        charge_cols = charge.find_elements_by_tag_name('td')
+        charge_cols = charge.find_elements(by=By.TAG_NAME, value='td')
         count = int(charge_cols[0].text.strip())
         charge_builder.count = count
 
@@ -217,7 +216,7 @@ def scrape_record(case_number):
     for plea_element in docket_pleas:
         plea_text = plea_element.text.strip()
         plea = ScraperUtils.parse_plea_type(plea_text)
-        plea_date = plea_element.find_element_by_xpath('./../td[2]').text.strip()
+        plea_date = plea_element.find_element(by=By.XPATH, value='./../td[2]').text.strip()
         plea_number = ScraperUtils.parse_plea_case_numbers(plea_text, list(Charges.keys()))
 
         # If no case number is specified in the plea, then we assume it applies to all charges in the trial.
@@ -234,22 +233,19 @@ def scrape_record(case_number):
     r.arresting_officer = None  # Can't be found on this portal
     r.arresting_officer_badge_number = None  # Can't be found on this portal
 
-    profile_link = driver.find_element_by_xpath("//table[@id='gridParties']/tbody/tr/*[contains(text(), 'DEFENDANT')]/../td[2]/div/a").get_attribute(
+    profile_link = driver.find_element(by=By.XPATH, value="//table[@id='gridParties']/tbody/tr/*[contains(text(), 'DEFENDANT')]/../td[2]/div/a").get_attribute(
        'href')
-    # profile_link = driver.find_element_by_xpath('//*[@id="gridParties"]/tbody/tr[1]/td[2]/div[1]/a').get_attribute(
+    # profile_link = driver.find_element(by=By.XPATH, value='//*[@id="gridParties"]/tbody/tr[1]/td[2]/div[1]/a').get_attribute(
     #     'href')
     load_page(profile_link, 'Party Details:', FLAGS.verbose)
 
     r.suffix = None
     r.dob = None  # This portal has DOB as N/A for every defendent
-    r.race = driver.find_element_by_xpath(
-        '//*[@id="fd-table-2"]/tbody/tr[2]/td[2]/table[2]/tbody/tr/td[2]/table/tbody/tr[7]/td[2]').text.strip()
-    r.sex = driver.find_element_by_xpath(
-        '//*[@id="mainTableContent"]/tbody/tr/td/table/tbody/tr[2]/td[2]/table[2]/tbody/tr/td[2]/table/tbody/tr[6]/td[2]').text.strip()
+    r.race = driver.find_element(by=By.XPATH, value='//*[@id="fd-table-2"]/tbody/tr[2]/td[2]/table[2]/tbody/tr/td[2]/table/tbody/tr[7]/td[2]').text.strip()
+    r.sex = driver.find_element(by=By.XPATH, value='//*[@id="mainTableContent"]/tbody/tr/td/table/tbody/tr[2]/td[2]/table[2]/tbody/tr/td[2]/table/tbody/tr[6]/td[2]').text.strip()
 
     # Navigate to party profile
-    full_name = driver.find_element_by_xpath(
-        '//*[@id="mainTableContent"]/tbody/tr/td/table/tbody/tr[2]/td[2]/table[2]/tbody/tr/td[2]/table/tbody/tr[1]/td[2]').text.strip()
+    full_name = driver.find_element(by=By.XPATH, value='//*[@id="mainTableContent"]/tbody/tr/td/table/tbody/tr[2]/td[2]/table[2]/tbody/tr/td[2]/table/tbody/tr[1]/td[2]').text.strip()
     r.middle_name = None
     r.last_name = None
     if ',' in full_name:
@@ -257,8 +253,7 @@ def scrape_record(case_number):
     else:
         # If there's no comma, it's a corporation name.
         r.first_name = Pii.String(full_name)
-    r.party_id = driver.find_element_by_xpath(
-        '//*[@id="mainTableContent"]/tbody/tr/td/table/tbody/tr[2]/td[2]/table[2]/tbody/tr/td[2]/table/tbody/tr[8]/td[2]').text.strip()  # PartyID is a field within the portal system to uniquely identify defendants
+    r.party_id = driver.find_element(by=By.XPATH, value='//*[@id="mainTableContent"]/tbody/tr/td/table/tbody/tr[2]/td[2]/table[2]/tbody/tr/td[2]/table/tbody/tr[8]/td[2]').text.strip()  # PartyID is a field within the portal system to uniquely identify defendants
 
     record = r.build()
     ScraperUtils.write_csv(FLAGS.output, record, FLAGS.verbose)
@@ -279,7 +274,7 @@ def search_portal(case_number):
 
     # Select Case Number textbox and enter case number
     select_case_input()
-    case_input = driver.find_element_by_id('caseNumber')
+    case_input = driver.find_element(by=By.ID, value='caseNumber')
     case_input.click()
     case_input.send_keys(case_number)
 
@@ -288,7 +283,7 @@ def search_portal(case_number):
         # Get Captcha. This is kinda nasty, but if there's no Captcha, then
         # this will throw (which is a good thing in this case) and we can
         # move on with processing.
-        recaptchav2_sitekey = driver.find_element_by_xpath('//*/div[@class="g-recaptcha"]').get_attribute("data-sitekey")
+        recaptchav2_sitekey = driver.find_element(by=By.XPATH, value='//*/div[@class="g-recaptcha"]').get_attribute("data-sitekey")
         
         if FLAGS.solve_captchas:
             # TODO: print -> logger
@@ -307,7 +302,7 @@ def search_portal(case_number):
             driver.execute_script('document.getElementById("g-recaptcha-response").innerHTML = "{}";'.format(result["code"]))
 
             # Do search
-            search_button = driver.find_element_by_id('searchButton')
+            search_button = driver.find_element(by=By.ID, value='searchButton')
             search_button.click()
         else:
             print(f"Captcha encountered trying to view case ID {case_number}.")
@@ -324,7 +319,7 @@ def search_portal(case_number):
     except NoSuchElementException:
         # No captcha on the page, continue.
         # Do search
-        search_button = driver.find_element_by_id('searchButton')
+        search_button = driver.find_element(by=By.ID, value='searchButton')
         search_button.click()
 
     # If the title stays as 'Search': Captcha solving failed
@@ -341,8 +336,7 @@ def search_portal(case_number):
                 try:
                     # Check if 'Invalid Captcha' dialog is showing
                     # Confirmed that this is still what is returned for a bad captcha!
-                    driver.find_element_by_xpath(
-                        '//div[@class="alert alert-error"]')
+                    driver.find_element(by=By.XPATH, value='//div[@class="alert alert-error"]')
                     print("Captcha was solved incorrectly")
                 except NoSuchElementException:
                     pass
@@ -387,19 +381,17 @@ def select_case_input():
             else:
                 load_page(f"{FLAGS.portal_base}/Home.aspx/Search", 'Search', FLAGS.verbose)
 
-    case_selector = driver.find_element_by_xpath(
-        '//*/input[@searchtype="CaseNumber"]')
+    case_selector = driver.find_element(by=By.XPATH, value='//*/input[@searchtype="CaseNumber"]')
     case_selector.click()
     try:
-        case_input = driver.find_element_by_id('caseNumber')
+        case_input = driver.find_element(by=By.ID, value='caseNumber')
         case_input.click()
     except ElementNotInteractableException:
         # Sometimes the caseNumber box does not appear, this is resolved by clicking to another radio button and back.
-        name_selector = driver.find_element_by_xpath(
-            '//*/input[@searchtype="Name"]')
+        name_selector = driver.find_element(by=By.XPATH, value='//*/input[@searchtype="Name"]')
         name_selector.cick()
         case_selector.click()
-        case_input = driver.find_element_by_id('caseNumber')
+        case_input = driver.find_element(by=By.ID, value='caseNumber')
         case_input.click()
 
     return case_input
