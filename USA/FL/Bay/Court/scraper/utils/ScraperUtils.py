@@ -12,6 +12,9 @@ from requests_toolbelt.utils import dump
 import requests
 from common.pii import Pii
 from common.record import Record
+from selenium.webdriver.common.by import By
+from selenium import webdriver
+
 
 
 @enforce_types
@@ -45,7 +48,7 @@ def parse_plea_case_numbers(plea_text: str, valid_charges: List[int]) -> List[in
         return []
 
 
-def parse_charge_statute(charge_text: str) -> (str, str):
+def parse_charge_statute(charge_text: str) -> tuple[str, str]:
     """
     Parses the charge description text into the charge and statute code separately
     :param charge_text: Charge description
@@ -116,8 +119,8 @@ def parse_plea_type(plea_text: str):
     return plea
 
 
-def parse_name(fullname_text: str) -> (
-        Optional[Pii.String], Optional[Pii.String], Optional[Pii.String]):
+def parse_name(fullname_text: str) -> tuple[
+        Optional[Pii.String], Optional[Pii.String], Optional[Pii.String]]:
     """
     Parses the first, middle and last name from a full name.
     :param fullname_text: Defendant's fullname as a String
@@ -234,7 +237,7 @@ def get_last_csv_row(csv_file) -> str:
     return line
 
 
-def save_attached_pdf(driver, directory, name, portal_base, download_href, timeout=20, verbose=False):
+def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_href, timeout=20, verbose=False):
     """
     Save a PDF docket attachment within a case.
     :param driver: Selenium driver
@@ -376,11 +379,11 @@ def get_search_case_count(driver, county):
     # Todo: This should be modularised out as a county-portal specific function
     # Get number of cases resolved
     if county == 'Bay':
-        case_detail_tbl = driver.find_element_by_tag_name('table').text.split('\n')
+        case_detail_tbl = driver.find_element(by=By.TAG_NAME,value='table').text.split('\n')
         case_count_idx = case_detail_tbl.index('CASES FOUND') + 1
         case_count = int(case_detail_tbl[case_count_idx])
     elif county == 'Escambia':
-        case_count_cell = driver.find_element_by_xpath(
+        case_count_cell = driver.find_element(by=By.XPATH, value=
             '//*[@class="casedetailSectionTable"]/tbody/tr/td/table/tbody/tr[4]/td[2]')
         case_count = int(case_count_cell.text)
 
@@ -394,6 +397,6 @@ def get_associated_cases(driver):
     :param driver: Selenium driver
     :return: A set of case numbers
     """
-    elems = driver.find_elements_by_class_name('sorting_1')
+    elems = driver.find_elements(by=By.CLASS_NAME, value='sorting_1')
     case_nums = set([e.text for e in elems])
     return case_nums
