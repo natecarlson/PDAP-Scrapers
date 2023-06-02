@@ -1,4 +1,4 @@
-selenium
+selenium==4.2.0
 opencv-python
 pytesseract
 pytest
@@ -12,5 +12,5 @@ dataclass-builder
 tqdm
 beautifulsoup4
 pandas
-doltpy==2.0.7
+doltpy==2.0.14
 Scrapy==2.5.1
