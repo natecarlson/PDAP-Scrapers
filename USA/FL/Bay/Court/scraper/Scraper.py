@@ -19,6 +19,7 @@ from utils.ScraperUtils import BenchmarkRecordBuilder
 
 # captcha solver
 from twocaptcha import TwoCaptcha
+from twocaptcha.api import ApiException
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string('portal_base', 'https://court.baycoclerk.com/BenchmarkWeb2/', 'Base of the portal to scrape.')
@@ -283,7 +284,6 @@ def search_portal(case_number):
     case_input.send_keys(case_number)
 
     # Solve captcha if it is required
-    solved_captcha = None
     try:
         # Get Captcha. This is kinda nasty, but if there's no Captcha, then
         # this will throw (which is a good thing in this case) and we can
@@ -295,7 +295,11 @@ def search_portal(case_number):
             print(f"Solving captcha with data-sitekey of: {recaptchav2_sitekey}")
             # TODO: Initialize this earlier, dummy.
             recaptchasolver = TwoCaptcha(FLAGS.captcha_api_key)
-            result = recaptchasolver.recaptcha(sitekey=recaptchav2_sitekey, url=search_page)
+            try:
+                result = recaptchasolver.recaptcha(sitekey=recaptchav2_sitekey, url=search_page)
+            except ApiException as e:
+                print(f"TwoCaptcha failure; exiting. Failure: {e}")
+                exit(1)
 
             print(f"Captcha solver results: {str(result)}")
 
@@ -340,9 +344,6 @@ def search_portal(case_number):
                     driver.find_element_by_xpath(
                         '//div[@class="alert alert-error"]')
                     print("Captcha was solved incorrectly")
-
-                    if FLAGS.solve_captchas and solved_captcha:
-                        solved_captcha.save_captcha(correct=False)
                 except NoSuchElementException:
                     pass
                 # Clear cookies so a new captcha is presented upon refresh
@@ -351,8 +352,7 @@ def search_portal(case_number):
                 search_portal(case_number)
             elif 'Search Results: CaseNumber:' in driver.title:
                 # Captcha solved correctly
-                if FLAGS.solve_captchas and solved_captcha:
-                    solved_captcha.save_captcha(correct=True)
+
                 # Figure out the number of cases returned
                 case_count = ScraperUtils.get_search_case_count(driver, FLAGS.county)
                 # Case number search found multiple cases.
@@ -363,8 +363,7 @@ def search_portal(case_number):
                     return set()
             elif case_number in driver.title:
                 # Captcha solved correctly
-                if FLAGS.solve_captchas and solved_captcha:
-                    solved_captcha.save_captcha(correct=True)
+
                 # Case number search did find a single court case.
                 return {case_number}
         except TimeoutException:
