@@ -30,6 +30,9 @@ from utils.ScraperUtils import BenchmarkRecordBuilder
 from twocaptcha import TwoCaptcha
 from twocaptcha.api import ApiException
 
+# use atexit to ensure that we clean up Selenium
+import atexit
+
 FLAGS = flags.FLAGS
 flags.DEFINE_string('portal_base', 'https://court.baycoclerk.com/BenchmarkWeb2/', 'Base of the portal to scrape.')
 flags.DEFINE_string('state', 'FL', 'State code we are scraping.', short_name='s')
@@ -57,13 +60,21 @@ ffx_profile = webdriver.FirefoxOptions()
 ffx_profile.set_capability('unexpectedAlertBehaviour', 'dismiss')
 
 
+
+def cleanup_selenium():
+    logging.info("Script exiting, make sure that Selenium driver is killed..")
+    driver.quit()
+
 if os.getenv('DOCKERIZED') == 'true':
     # If running through docker-compose, use the standalone firefox container. See: docker-compose.yml#firefox
     driver = webdriver.Remote(
        command_executor='http://firefox:4444/wd/hub',
        desired_capabilities=ffx_profile.to_capabilities())
+    
+    atexit.register(cleanup_selenium)
 else:
     driver = webdriver.Firefox(options=ffx_profile)
+    atexit.register(cleanup_selenium)
 
 def main(argv):
     del argv
@@ -380,11 +391,9 @@ def search_portal(case_number):
                 result = recaptchasolver.recaptcha(sitekey=recaptchav2_sitekey, url=search_page)
             except ApiException as e:
                 logging.error(f"TwoCaptcha API Exception; exiting. Failure: {e}")
-                driver.quit()
                 exit(1)
             except Exception as e:
                 logging.error(f"TwoCaptcha other exception; exiting. Failure: {e}")
-                driver.quit()
                 exit(1)
 
             logging.debug(f"Captcha solver results: {str(result)}")

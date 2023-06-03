@@ -1,0 +1,4 @@
+.env
+# Maybe these should be allowed? But nah.
+attachments/
+bay-county-scraped.csv
