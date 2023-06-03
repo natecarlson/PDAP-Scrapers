@@ -33,6 +33,8 @@ from twocaptcha.api import ApiException
 # use atexit to ensure that we clean up Selenium
 import atexit
 
+import csv
+
 FLAGS = flags.FLAGS
 flags.DEFINE_string('portal_base', 'https://court.baycoclerk.com/BenchmarkWeb2/', 'Base of the portal to scrape.')
 flags.DEFINE_string('state', 'FL', 'State code we are scraping.', short_name='s')
@@ -44,6 +46,7 @@ flags.DEFINE_integer('end_year', datetime.now().year, 'Year at which to end scra
 flags.DEFINE_bool('solve_captchas', True, 'Whether to solve captchas.')
 flags.DEFINE_enum('save_attachments', 'none', ['none', 'filing', 'all'], 'Which attachments to save.', short_name='a')
 flags.DEFINE_string('output', 'bay-county-scraped.csv', 'Relative filename for our CSV', short_name='o')
+flags.DEFINE_string('output_requested_dockets', 'bay-county-requested-dockets.csv', 'Relative filename for dockets we have put in a request for')
 
 flags.DEFINE_integer('missing_thresh', 5, 'Number of consecutive missing records after which we move to the next year', short_name='t')
 flags.DEFINE_integer('connect_thresh', 10, 'Number of failed connection attempts allowed before giving up')
@@ -99,6 +102,14 @@ def begin_scrape():
     :return:
     """
     global driver
+
+    # open output csv file where we store a list of dockets that have been requested
+    global requested_dockets_writer
+    fieldnames = ['requested_epoch','case_number','docket_number','docket_text']
+    requested_dockets_csv = open(FLAGS.output_requested_dockets, 'a', newline='')
+    requested_dockets_writer = csv.DictWriter(requested_dockets_csv, fieldnames=fieldnames)
+    # This results in the header being written multiple times.. whatever.
+    requested_dockets_writer.writeheader()
     
     # Find the progress of any past scraping runs to continue from then
     try:
@@ -163,6 +174,9 @@ def begin_scrape():
 
             logging.info(f"Year {year} case {case_number}: Scrape complete.")
 
+            # Flush the requested records csv to make sure we keep the updates.
+            requested_dockets_csv.flush()
+
             # If we've scraped 5 or more cases, delete cookies, and reset counter.
             if cases_scraped_since_reset >= 5:
                 logging.info("Resetting cookies to attempt to get multiple cases with a single Captcha again.")
@@ -174,6 +188,8 @@ def begin_scrape():
         continuing = False
 
         logging.info("Scraping for year {} is complete".format(year))
+
+    requested_dockets_csv.close()
 
 
 def scrape_record(case_number):
@@ -248,6 +264,14 @@ def scrape_record(case_number):
                 result.raise_for_status()
                 logging.info(f"Case {case_number}: Requested docket attachment {case_docket_id}-{attachment_text} to be posted.")
 
+                # Write to the CSV
+                requested_dockets_writer.writerow(
+                    {
+                        'requested_epoch': int( time.time() ),
+                        'case_number': case_number,
+                        'docket_number': case_docket_id,
+                        'docket_text': attachment_text
+                    })
             except HTTPError as http_err:
                 logging.warn(f'HTTP error occurred while requesting docket {case_docket_id}; continuing. Error: {http_err}')
                 pass
@@ -385,9 +409,9 @@ def search_portal(case_number):
         logging.info(f"Case {case_number}: Captcha encoutered; solving via service..")
 
         if FLAGS.solve_captchas:
-            # TODO: logging.info -> logger
             logging.debug(f"Solving captcha with data-sitekey of: {recaptchav2_sitekey}")
 
+            # TODO: Retries
             try:
                 result = recaptchasolver.recaptcha(sitekey=recaptchav2_sitekey, url=search_page)
             except ApiException as e:
