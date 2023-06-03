@@ -237,7 +237,7 @@ def get_last_csv_row(csv_file) -> str:
     return line
 
 
-def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_href, timeout=20, verbose=False):
+def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_href, logging, timeout=20):
     """
     Save a PDF docket attachment within a case.
     :param driver: Selenium driver
@@ -272,8 +272,7 @@ def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_
         This section does a GET request for PDFViewer2. 
         This stage may not be necessary, but I do it anyway so that later requests have a legitimate 'Referer' header.
         """
-        if verbose:
-            print('Sending GET: PDFViewer2')
+        logging.debug('Sending GET: PDFViewer2')
         get_PDFViewer2_url = '{}Image.aspx/PDFViewer2?cid={}&digest={}'.format(portal_base, cid, digest)
         # GET for PDFViewer2 with cid and digest
         get_PDFViewer2 = requests.Request('GET', get_PDFViewer2_url, headers={
@@ -285,12 +284,13 @@ def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_
         prepared_get_PDFViewer2 = get_PDFViewer2.prepare()
         response = s.send(prepared_get_PDFViewer2, timeout=timeout)
         response.raise_for_status()  # Check HTTP status is 200 OK
-        if verbose:
-            print('Response for GET PDFViewer2 Received')
+        # This still might be a bit excessive, even at debug level..
+        if False:
+            logging.debug('Response for GET PDFViewer2 Received')
             data = dump.dump_all(response)
-            print(data.decode('utf-8'))
-            print('--------')
-            print("Sending POST: getPDFRequestGuid")
+            logging.debug(data.decode('utf-8'))
+            logging.debug('--------')
+            logging.debug("Sending POST: getPDFRequestGuid")
 
         """
         This section does a POST for the attachment's access GUID
@@ -311,12 +311,12 @@ def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_
         response = s.send(prepared_post_getPDFRequestGuid, timeout=timeout)
         response.raise_for_status()  # Check HTTP status is 200 OK
         guid = response.content.decode('utf-8')
-        if verbose:
-            print("Response for POST getPDFRequestGuid received. GUID is:", guid)
+        if False:
+            logging.debug("Response for POST getPDFRequestGuid received. GUID is:", guid)
             data = dump.dump_all(response)
-            print(data.decode('utf-8'))
-            print('--------')
-            print("Sending GET: GetPDF")
+            logging.debug(data.decode('utf-8'))
+            logging.debug('--------')
+            logging.debug("Sending GET: GetPDF")
 
         """
         This last section starts the download with a GET for the PDF itself.
@@ -332,8 +332,7 @@ def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_
         prepared_get_GetPDF = get_GetPDF.prepare()
         response = s.send(prepared_get_GetPDF, timeout=timeout)
         response.raise_for_status()  # Check HTTP status is 200 OK
-        if verbose:
-            print("Response for GET GetPDF received.")
+        logging.debug("Response for GET GetPDF received.")
 
         outfile = parse_out_path(directory, name, 'pdf')
         with open(outfile, 'wb') as writer:

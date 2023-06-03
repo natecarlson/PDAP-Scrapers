@@ -5,12 +5,18 @@ import os
 import uuid
 from absl import app
 from absl import flags
+# Try out ABSL's logging, see if it sucks.
+from absl import logging
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException, TimeoutException
+
+from requests.exceptions import HTTPError, Timeout
+from requests_toolbelt.utils import dump
+import requests
 
 p = Path(__file__).resolve().parents[5]
 sys.path.insert(1, str(p))
@@ -59,9 +65,20 @@ if os.getenv('DOCKERIZED') == 'true':
 else:
     driver = webdriver.Firefox(options=ffx_profile)
 
-
 def main(argv):
     del argv
+
+    # Initialize log level
+    if FLAGS.verbose:
+        logging.set_verbosity(logging.DEBUG)
+    else:
+        logging.set_verbosity(logging.INFO)
+
+    # Initialize 2captcha
+    if FLAGS.solve_captchas:
+        global recaptchasolver
+        recaptchasolver = TwoCaptcha(FLAGS.captcha_api_key)
+
     begin_scrape()
 
 
@@ -71,11 +88,11 @@ def begin_scrape():
     :return:
     """
     global driver
-
+    
     # Find the progress of any past scraping runs to continue from then
     try:
         last_case_number = ScraperUtils.get_last_csv_row(FLAGS.output).split(',')[3]
-        print("Continuing from last scrape (Case number: {})".format(last_case_number))
+        logging.info("Continuing from last scrape (Case number: {})".format(last_case_number))
         last_year = 2000 + int(str(last_case_number)[:2])  # I know there's faster ways of doing this. It only runs once ;)
         if not last_case_number.isnumeric():
             last_case_number = last_case_number[:-4]
@@ -94,35 +111,58 @@ def begin_scrape():
         else:
             N = 1
 
-        print("Scraping year {} from case {}".format(year, N))
+        logging.info("Scraping year {} from case {}".format(year, N))
         YY = year % 100
 
         record_missing_count = 0
+
+        # Keep a count of cases we've scraped since resetting cookies.
+        # Seems like they ask for a captcha once, allow 5 case lookups, and then ask for a captcha every time.
+        # So, do a total of 5 case lookups, and then reset the cookies.
+        cases_scraped_since_reset = 0
+
         # Increment case numbers until the threshold missing cases is met, then advance to the next year.
         while record_missing_count < FLAGS.missing_thresh:
             # Generate the case number to scrape
             case_number = f'{YY:02}' + f'{N:06}'
 
+            logging.info(f"Year {year} case {case_number}: Scrape started.")
+
             search_result = search_portal(case_number)
+            cases_scraped_since_reset += 1
+
             if search_result:
                 record_missing_count = 0
                 # if multiple associated cases are found,
                 # scrape all of them
                 if len(search_result) > 1:
                     for case in search_result:
+                        logging.info(f"Year {year} case {case_number}: Scraping additional case {case}..")
                         search_portal(case)
+                        # TODO: Do we need to validate that the additional case lookup doesn't return multiple cases?
+                        cases_scraped_since_reset += 1
                         scrape_record(case)
                 # only a single case, no multiple associated cases found
                 else:
                     scrape_record(case_number)
+
             else:
+                logging.info(f"Year {year} case {case_number}: Case not found! Incrementing missing count..")
                 record_missing_count += 1
+
+            logging.info(f"Year {year} case {case_number}: Scrape complete.")
+
+            # If we've scraped 5 or more cases, delete cookies, and reset counter.
+            if cases_scraped_since_reset >= 5:
+                logging.info("Resetting cookies to attempt to get multiple cases with a single Captcha again.")
+                driver.delete_all_cookies()
+                cases_scraped_since_reset = 0
 
             N += 1
 
         continuing = False
 
-        print("Scraping for year {} is complete".format(year))
+        logging.info("Scraping for year {} is complete".format(year))
 
 
 def scrape_record(case_number):
@@ -160,6 +200,48 @@ def scrape_record(case_number):
     docket_attorney = driver.find_elements(by=By.XPATH, value="//*[contains(text(), 'DEFENSE') and contains(text(), 'ASSIGNED')]")
     docket_pleas = driver.find_elements(by=By.XPATH, value="//*[contains(text(), 'PLEA OF')]")
     docket_attachments = driver.find_elements(by=By.CLASS_NAME, value='casedocketimage')
+    docket_attachments_to_request = driver.find_elements(by=By.CLASS_NAME, value='popmodal')
+
+    # Process dockets that aren't available but are requestable..
+    # TODO: Store the fact that we've requested these dockets, so we know to come back for 'em later.
+    if FLAGS.save_attachments:
+        # Some dockets aren't available, but are requestable.
+        # For those dockets, we need to send a POST to:
+        # https://court.baycoclerk.com/BenchmarkWeb2/CaseDocket.aspx/Request
+        # with "caseDocketID=<x>&email="
+
+        for request_link in docket_attachments_to_request:
+            case_docket_id = request_link.get_attribute('casedocketid')
+            
+            # Copy Selenium's user agent and headers to requests - this is from the save_attached_pdf function.
+            user_agent = driver.execute_script('return navigator.userAgent;')
+            session = requests.Session()
+            host = FLAGS.portal_base.split('/')[2]
+            session.headers.update({'User-Agent': user_agent, 'Host': host, 'Connection': 'keep-alive', 'Accept-Language': 'en-US,en;q=0.5', 'Accept-Encoding': 'gzip, deflate, br', 'Accept': 'text/css,*/*;q=0.1'})
+            portal_cookies = driver.get_cookies()
+            cookie_header = ''
+            for cookie in portal_cookies:
+                cookie_header += '{}={}; '.format(cookie['name'], cookie['value'])
+            cookie_header = cookie_header[:-2]  # Remove last deliminator '; '
+
+            try:
+                docketrequestlink = f'{FLAGS.portal_base}/BenchmarkWeb2/CaseDocket.aspx/Request'
+                raw_data=f"caseDocketID={case_docket_id}&email="
+                result = session.post(url=docketrequestlink, headers={
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Referer': driver.current_url,
+                    'Upgrade-Insecure-Requests': '1',
+                    'Cookie': cookie_header
+                }, data=raw_data)
+                result.raise_for_status()
+                logging.info(f"Case {case_number}: Requested docket attachment {case_docket_id} to be posted.")
+
+            except HTTPError as http_err:
+                logging.warn(f'HTTP error occurred while requesting docket {case_docket_id}; continuing. Error: {http_err}')
+                pass
+            except Timeout:
+                logging.warn(f'HTTP timeout occurred while requesting docket {case_docket_id}; continuing.')
+                pass
 
     r = BenchmarkRecordBuilder()
     r.id = str(uuid.uuid4())
@@ -194,8 +276,9 @@ def scrape_record(case_number):
                 if not ('CITATION FILED' in attachment_text or 'CASE FILED' in attachment_text):
                     # Attachment is not a filing, don't download it.
                     continue
-            ScraperUtils.save_attached_pdf(driver, output_attachments, '{}-{}'.format(case_number, attachment_text),
-                                           FLAGS.portal_base, attachment_link, 20, FLAGS.verbose)
+            logging.info(f"Case {case_number}: Downloading docket attachment: {case_number}-{attachment_text}.")
+            ScraperUtils.save_attached_pdf(driver=driver, directory=output_attachments, name='{}-{}'.format(case_number, attachment_text),
+                                           portal_base=FLAGS.portal_base, download_href=attachment_link, logging=logging, timeout=20)
 
     Charges = {}
     for charge in charges_table:
@@ -261,7 +344,6 @@ def scrape_record(case_number):
     record = r.build()
     ScraperUtils.write_csv(FLAGS.output, record, FLAGS.verbose)
 
-
 def search_portal(case_number):
     """
     Performs a search of the portal from its home page, including selecting the case number input, solving the captcha
@@ -288,37 +370,47 @@ def search_portal(case_number):
         # move on with processing.
         recaptchav2_sitekey = driver.find_element(by=By.XPATH, value='//*/div[@class="g-recaptcha"]').get_attribute("data-sitekey")
         
+        logging.info(f"Case {case_number}: Captcha encoutered; solving via service..")
+
         if FLAGS.solve_captchas:
-            # TODO: print -> logger
-            print(f"Solving captcha with data-sitekey of: {recaptchav2_sitekey}")
-            # TODO: Initialize this earlier, dummy.
-            recaptchasolver = TwoCaptcha(FLAGS.captcha_api_key)
+            # TODO: logging.info -> logger
+            logging.debug(f"Solving captcha with data-sitekey of: {recaptchav2_sitekey}")
+
             try:
                 result = recaptchasolver.recaptcha(sitekey=recaptchav2_sitekey, url=search_page)
             except ApiException as e:
-                print(f"TwoCaptcha failure; exiting. Failure: {e}")
+                logging.error(f"TwoCaptcha API Exception; exiting. Failure: {e}")
+                driver.quit()
+                exit(1)
+            except Exception as e:
+                logging.error(f"TwoCaptcha other exception; exiting. Failure: {e}")
                 driver.quit()
                 exit(1)
 
-            print(f"Captcha solver results: {str(result)}")
+            logging.debug(f"Captcha solver results: {str(result)}")
 
             # Fill in the field
             driver.execute_script('document.getElementById("g-recaptcha-response").innerHTML = "{}";'.format(result["code"]))
+
+            logging.info(f"Case {case_number}: Captcha solved; submitting result.")
 
             # Do search
             search_button = driver.find_element(by=By.ID, value='searchButton')
             search_button.click()
         else:
-            print(f"Captcha encountered trying to view case ID {case_number}.")
-            print("Please solve the captcha and click the search button to proceed.")
+            logging.info(f"Captcha encountered trying to view case ID {case_number}.")
+            logging.info("Please solve the captcha and click the search button to proceed.")
             while True:
                 try:
                     WebDriverWait(driver, 6 * 60 * 60).until(
                         lambda x: case_number in driver.title )
-                    print("continuing...")
+                    
+                    logging.info(f"Case {case_number}: Captcha solved manually.")
+
+                    logging.info("continuing...")
                     break
                 except TimeoutException:
-                    print("still waiting for user to solve the captcha...")
+                    logging.info("still waiting for user to solve the captcha...")
 
     except NoSuchElementException:
         # No captcha on the page, continue.
@@ -341,7 +433,7 @@ def search_portal(case_number):
                     # Check if 'Invalid Captcha' dialog is showing
                     # Confirmed that this is still what is returned for a bad captcha!
                     driver.find_element(by=By.XPATH, value='//div[@class="alert alert-error"]')
-                    print("Captcha was solved incorrectly")
+                    logging.info("Captcha was solved incorrectly")
                 except NoSuchElementException:
                     pass
                 # Clear cookies so a new captcha is presented upon refresh
@@ -408,7 +500,7 @@ def load_page(url, expectedTitle, verbose=False):
     :param expectedTitle: Part of expected page title if page loads successfully. Either str or list[str].
     """
     if verbose:
-        print('Loading page:', url)
+        logging.info('Loading page:', url)
     driver.get(url)
     for i in range(FLAGS.connect_thresh):
         try:
@@ -425,14 +517,15 @@ def load_page(url, expectedTitle, verbose=False):
                 raise RuntimeError('Page {} could not be loaded after {} attempts. Check connction.'.format(url, FLAGS.connect_thresh))
             else:
                 if verbose:
-                    print('Retrying page (attempt {}/{}): {}'.format(i+1, FLAGS.connect_thresh, url))
+                    logging.info('Retrying page (attempt {}/{}): {}'.format(i+1, FLAGS.connect_thresh, url))
                 driver.get(url)
 
-    print('Page {} could not be loaded after {} attempts. Check connection.'.format(url, FLAGS.connect_thresh),
+    logging.info('Page {} could not be loaded after {} attempts. Check connection.'.format(url, FLAGS.connect_thresh),
           file=sys.stderr)
 
 
 if __name__ == '__main__':
     if not os.path.exists(output_attachments):
-        os.makedirs(output_attachments)
+        os.makedirs(output_attachments)   
+
     app.run(main)
