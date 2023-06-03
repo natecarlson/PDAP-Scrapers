@@ -222,6 +222,7 @@ def scrape_record(case_number):
         # with "caseDocketID=<x>&email="
 
         for request_link in docket_attachments_to_request:
+            attachment_text = request_link.find_element(by=By.XPATH, value='./../../td[3]').text.strip()
             case_docket_id = request_link.get_attribute('casedocketid')
             
             # Copy Selenium's user agent and headers to requests - this is from the save_attached_pdf function.
@@ -245,7 +246,7 @@ def scrape_record(case_number):
                     'Cookie': cookie_header
                 }, data=raw_data)
                 result.raise_for_status()
-                logging.info(f"Case {case_number}: Requested docket attachment {case_docket_id} to be posted.")
+                logging.info(f"Case {case_number}: Requested docket attachment {case_docket_id}-{attachment_text} to be posted.")
 
             except HTTPError as http_err:
                 logging.warn(f'HTTP error occurred while requesting docket {case_docket_id}; continuing. Error: {http_err}')
