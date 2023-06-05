@@ -1,6 +1,6 @@
 selenium==4.9.1
 opencv-python
-pytesseract
+#pytesseract
 pytest
 pathvalidate
 requests
@@ -11,8 +11,9 @@ enforce-typing
 dataclass-builder
 tqdm
 beautifulsoup4
-pandas
-doltpy==2.0.14
-Scrapy==2.5.1
+pandas==2.0.2
+#doltpy==2.0.14
+#Scrapy==2.5.1
 2captcha-python
 python-dotenv
+savepagenow

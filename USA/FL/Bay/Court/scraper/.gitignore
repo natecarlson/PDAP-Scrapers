@@ -2,3 +2,5 @@
 # Maybe these should be allowed? But nah.
 attachments/
 bay-county-scraped.csv
+# don't allow my run script
+run.sh
