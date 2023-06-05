@@ -48,7 +48,7 @@ flags.DEFINE_enum('save_attachments', 'none', ['none', 'filing', 'all'], 'Which 
 flags.DEFINE_string('output', 'bay-county-scraped.csv', 'Relative filename for our CSV', short_name='o')
 flags.DEFINE_string('output_requested_dockets', 'bay-county-requested-dockets.csv', 'Relative filename for dockets we have put in a request for')
 
-flags.DEFINE_integer('missing_thresh', 5, 'Number of consecutive missing records after which we move to the next year', short_name='t')
+flags.DEFINE_integer('missing_thresh', 30, 'Number of consecutive missing records after which we move to the next year', short_name='t')
 flags.DEFINE_integer('connect_thresh', 10, 'Number of failed connection attempts allowed before giving up')
 
 flags.DEFINE_string('captcha_api_key', 'fake key', '2Captcha API Key')
@@ -59,10 +59,10 @@ flags.DEFINE_bool('verbose', False, 'Whether to be noisy.')
 output_attachments = os.path.join(os.getcwd(), 'attachments')
 
 ffx_profile = webdriver.FirefoxOptions()
+
 # Automatically dismiss unexpected alerts.
 ffx_profile.set_capability('unexpectedAlertBehaviour', 'dismiss')
-
-
+#ffx_profile.add_argument('-headless')
 
 def cleanup_selenium():
     logging.info("Script exiting, make sure that Selenium driver is killed..")
@@ -231,7 +231,8 @@ def scrape_record(case_number):
 
     # Process dockets that aren't available but are requestable..
     # TODO: Store the fact that we've requested these dockets, so we know to come back for 'em later.
-    if FLAGS.save_attachments:
+    # Disable this for now.. older cases have a ton and it takes for-freakin-ever.
+    if FLAGS.save_attachments and False:
         # Some dockets aren't available, but are requestable.
         # For those dockets, we need to send a POST to:
         # https://court.baycoclerk.com/BenchmarkWeb2/CaseDocket.aspx/Request
