@@ -13,9 +13,6 @@ import requests
 from common.pii import Pii
 from common.record import Record
 from selenium.webdriver.common.by import By
-from selenium import webdriver
-
-
 
 @enforce_types
 @dataclass(frozen=True)
@@ -237,39 +234,41 @@ def get_last_csv_row(csv_file) -> str:
     return line
 
 
-def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_href, logging, timeout=20):
+def save_attached_pdf(user_agent, portal_cookies, current_url, javascript_time, directory, name, portal_base, attachment_info, logging, timeout=20):
     """
     Save a PDF docket attachment within a case.
-    :param driver: Selenium driver
+    :param user_agent: Selenium driver.execute_script('return navigator.userAgent;')
+    :param portal_cookies: Selenium driver.get_cookies()
+    :param current_url: Selenium driver.current_url
+    :param javascript_time: Selenium driver.execute_script('return String(new Date())').replace(' ', '+')
     :param directory: Directory to save attachment
     :param name: Name for PDF
     :param portal_base: Base URL for the portal. Eg: 'https://court.baycoclerk.com/BenchmarkWeb2/'
-    :param download_href: Href for the download link, which holds attributes 'rel' (cid) and 'digest'.
+    :param attachment_info: Dict that contains the attachment text, rel, and digest.
     :param timeout: Time before aborting HTTP requests
     :param verbose: Print HTTP GET/POSTs for debugging
     :return: True (Success), False (Failure).
     """
     # Copy Selenium's user agent and headers to requests
-    user_agent = driver.execute_script('return navigator.userAgent;')
     s = requests.Session()
+
     host = portal_base.split('/')[2]
     s.headers.update({'User-Agent': user_agent, 'Host': host, 'Connection': 'keep-alive', 'Accept-Language': 'en-US,en;q=0.5', 'Accept-Encoding': 'gzip, deflate, br', 'Accept': 'text/css,*/*;q=0.1'})
 
     # It took me AGES to work this out, the portal does NOT handle cookies in a standard way. This meant my requests
     # always got 'access denied' even when I copied the cookies from Selenium to requests.
-    portal_cookies = driver.get_cookies()
     cookie_header = ''
     for cookie in portal_cookies:
         cookie_header += '{}={}; '.format(cookie['name'], cookie['value'])
     cookie_header = cookie_header[:-2]  # Remove last deliminator '; '
 
     # Attempt to make the same HTTP requests as the website would, to be more stealthy ;)
-    cid = download_href.get_attribute('rel')
-    digest = download_href.get_attribute('digest')
+    cid = attachment_info["rel"]
+    digest = attachment_info["digest"]
 
     try:
         """
-        This section does a GET request for PDFViewer2. 
+        This section does a GET request for PDFViewer2.
         This stage may not be necessary, but I do it anyway so that later requests have a legitimate 'Referer' header.
         """
         logging.debug('Sending GET: PDFViewer2')
@@ -277,7 +276,7 @@ def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_
         # GET for PDFViewer2 with cid and digest
         get_PDFViewer2 = requests.Request('GET', get_PDFViewer2_url, headers={
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Referer': driver.current_url,
+            'Referer': current_url,
             'Upgrade-Insecure-Requests': '1',
             'Cookie': cookie_header
         })
@@ -295,7 +294,6 @@ def save_attached_pdf(driver: webdriver, directory, name, portal_base, download_
         """
         This section does a POST for the attachment's access GUID
         """
-        javascript_time = driver.execute_script('return String(new Date())').replace(' ', '+')
         # Get the Javascript time formatting, as this is embedded in the POST url.
         post_getPDFRequestGuid_url = '{}ImageAsync.aspx/GetPDFRequestGuid?cid={}&digest={}&time={}&redacted={}'.format(portal_base, cid, digest, javascript_time, False)
         post_getPDFRequestGuid = requests.Request('POST', post_getPDFRequestGuid_url, headers={

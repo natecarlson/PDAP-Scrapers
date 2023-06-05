@@ -35,6 +35,9 @@ import atexit
 
 import csv
 
+# Parallel downloads..
+import concurrent.futures
+
 FLAGS = flags.FLAGS
 flags.DEFINE_string('portal_base', 'https://court.baycoclerk.com/BenchmarkWeb2/', 'Base of the portal to scrape.')
 flags.DEFINE_string('state', 'FL', 'State code we are scraping.', short_name='s')
@@ -73,7 +76,7 @@ if os.getenv('DOCKERIZED') == 'true':
     driver = webdriver.Remote(
        command_executor='http://firefox:4444/wd/hub',
        desired_capabilities=ffx_profile.to_capabilities())
-    
+
     atexit.register(cleanup_selenium)
 else:
     driver = webdriver.Firefox(options=ffx_profile)
@@ -110,7 +113,7 @@ def begin_scrape():
     requested_dockets_writer = csv.DictWriter(requested_dockets_csv, fieldnames=fieldnames)
     # This results in the header being written multiple times.. whatever.
     requested_dockets_writer.writeheader()
-    
+
     # Find the progress of any past scraping runs to continue from then
     try:
         last_case_number = ScraperUtils.get_last_csv_row(FLAGS.output).split(',')[3]
@@ -241,7 +244,7 @@ def scrape_record(case_number):
         for request_link in docket_attachments_to_request:
             attachment_text = request_link.find_element(by=By.XPATH, value='./../../td[3]').text.strip()
             case_docket_id = request_link.get_attribute('casedocketid')
-            
+
             # Copy Selenium's user agent and headers to requests - this is from the save_attached_pdf function.
             user_agent = driver.execute_script('return navigator.userAgent;')
             session = requests.Session()
@@ -307,15 +310,49 @@ def scrape_record(case_number):
     # Download docket attachments.
     # Todo(OscarVanL): This could be parallelized to speed up scraping if save-attachments is set to 'all'.
     if FLAGS.save_attachments:
+        # Set these variables here, as calling driver.() from multiple threads is bad sauce.
+        user_agent=str(driver.execute_script('return navigator.userAgent;'))
+        portal_cookies=driver.get_cookies().copy()
+        print(portal_cookies)
+        current_url=str(driver.current_url)
+        javascript_time=str(driver.execute_script('return String(new Date())').replace(' ', '+'))
+
+        attachments_to_process = []
+        # Build list-of-dicts of attachments to download, to avoid having to do this within multithreaded below.
         for attachment_link in docket_attachments:
-            attachment_text = attachment_link.find_element(by=By.XPATH, value='./../../td[3]').text.strip()
+            # Grab the date and reformat as YYYY_MM_DD
+            attachment_date = attachment_link.find_element(by=By.XPATH, value='./../../td[2]').text.strip()
+            formatted_date = datetime.strptime(attachment_date, "%m/%d/%Y").strftime("%Y_%m_%d")
+            # Build the text to include the date, to deduplicate.
+            attachment_text = formatted_date + " " + attachment_link.find_element(by=By.XPATH, value='./../../td[3]').text.strip()
             if FLAGS.save_attachments == 'filing':
                 if not ('CITATION FILED' in attachment_text or 'CASE FILED' in attachment_text):
                     # Attachment is not a filing, don't download it.
                     continue
-            logging.info(f"Case {case_number}: Downloading docket attachment: {case_number}-{attachment_text}.")
-            ScraperUtils.save_attached_pdf(driver=driver, directory=output_attachments, name='{}-{}'.format(case_number, attachment_text),
-                                           portal_base=FLAGS.portal_base, download_href=attachment_link, logging=logging, timeout=20)
+            attachment = dict()
+            attachment["text"] = attachment_text
+            attachment["rel"] = attachment_link.get_attribute('rel')
+            attachment["digest"] = attachment_link.get_attribute('digest')
+
+            attachments_to_process.append(attachment)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_attachment = {}
+            for attachment in attachments_to_process:
+                logging.info(f"Case {case_number}: Queuing attachment: {case_number}-{attachment['text']}.")
+                future = executor.submit(ScraperUtils.save_attached_pdf, user_agent=user_agent, portal_cookies=portal_cookies, current_url=current_url, javascript_time=javascript_time, directory=output_attachments, name='{}-{}'.format(case_number, attachment["text"]),
+                                            portal_base=FLAGS.portal_base, attachment_info=attachment, logging=logging, timeout=20)
+                future_to_attachment[future] = attachment
+
+            for future in concurrent.futures.as_completed(future_to_attachment):
+                attachment = future_to_attachment[future]
+                try:
+                    result = future.result()
+                    logging.info(f"Case {case_number}: Finished downloading attachment: {case_number}-{attachment['text']}.")
+                    # Handle the result if needed
+                except Exception as e:
+                    # Handle exceptions that occurred during the download
+                    logging.error(f"Error downloading attachment {attachment['text']}: {str(e)}")
 
     Charges = {}
     for charge in charges_table:
@@ -406,7 +443,7 @@ def search_portal(case_number):
         # this will throw (which is a good thing in this case) and we can
         # move on with processing.
         recaptchav2_sitekey = driver.find_element(by=By.XPATH, value='//*/div[@class="g-recaptcha"]').get_attribute("data-sitekey")
-        
+
         logging.info(f"Case {case_number}: Captcha encoutered; solving via service..")
 
         if FLAGS.solve_captchas:
@@ -439,7 +476,7 @@ def search_portal(case_number):
                 try:
                     WebDriverWait(driver, 6 * 60 * 60).until(
                         lambda x: case_number in driver.title )
-                    
+
                     logging.info(f"Case {case_number}: Captcha solved manually.")
 
                     logging.info("continuing...")
@@ -561,6 +598,6 @@ def load_page(url, expectedTitle, verbose=False):
 
 if __name__ == '__main__':
     if not os.path.exists(output_attachments):
-        os.makedirs(output_attachments)   
+        os.makedirs(output_attachments)
 
     app.run(main)
