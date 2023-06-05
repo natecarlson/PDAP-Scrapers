@@ -236,6 +236,8 @@ def scrape_record(case_number):
     # TODO: Store the fact that we've requested these dockets, so we know to come back for 'em later.
     # Disable this for now.. older cases have a ton and it takes for-freakin-ever.
     if FLAGS.save_attachments and False:
+        # TODO: Reimplement this with parallel support like downloads.
+        #
         # Some dockets aren't available, but are requestable.
         # For those dockets, we need to send a POST to:
         # https://court.baycoclerk.com/BenchmarkWeb2/CaseDocket.aspx/Request
@@ -308,12 +310,10 @@ def scrape_record(case_number):
     r.judge = Pii.String(summary_table_col1[0].text.strip())
 
     # Download docket attachments.
-    # Todo(OscarVanL): This could be parallelized to speed up scraping if save-attachments is set to 'all'.
     if FLAGS.save_attachments:
         # Set these variables here, as calling driver.() from multiple threads is bad sauce.
         user_agent=str(driver.execute_script('return navigator.userAgent;'))
         portal_cookies=driver.get_cookies().copy()
-        print(portal_cookies)
         current_url=str(driver.current_url)
         javascript_time=str(driver.execute_script('return String(new Date())').replace(' ', '+'))
 
