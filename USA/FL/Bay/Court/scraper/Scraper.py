@@ -59,28 +59,14 @@ flags.DEFINE_string('captcha_api_key', 'fake key', '2Captcha API Key')
 # TODO(mcsaucy): move everything over to absl.logging so we get this for free
 flags.DEFINE_bool('verbose', False, 'Whether to be noisy.')
 
+flags.DEFINE_bool('headless', False, 'Run in headless mode?')
+
+
 output_attachments = os.path.join(os.getcwd(), 'attachments')
-
-ffx_profile = webdriver.FirefoxOptions()
-
-# Automatically dismiss unexpected alerts.
-ffx_profile.set_capability('unexpectedAlertBehaviour', 'dismiss')
-#ffx_profile.add_argument('-headless')
 
 def cleanup_selenium():
     logging.info("Script exiting, make sure that Selenium driver is killed..")
     driver.quit()
-
-if os.getenv('DOCKERIZED') == 'true':
-    # If running through docker-compose, use the standalone firefox container. See: docker-compose.yml#firefox
-    driver = webdriver.Remote(
-       command_executor='http://firefox:4444/wd/hub',
-       desired_capabilities=ffx_profile.to_capabilities())
-
-    atexit.register(cleanup_selenium)
-else:
-    driver = webdriver.Firefox(options=ffx_profile)
-    atexit.register(cleanup_selenium)
 
 def main(argv):
     del argv
@@ -95,6 +81,27 @@ def main(argv):
     if FLAGS.solve_captchas:
         global recaptchasolver
         recaptchasolver = TwoCaptcha(FLAGS.captcha_api_key)
+
+    ffx_profile = webdriver.FirefoxOptions()
+
+    # Automatically dismiss unexpected alerts.
+    ffx_profile.set_capability('unexpectedAlertBehaviour', 'dismiss')
+
+    if FLAGS.headless:
+        ffx_profile.add_argument('-headless')
+
+    global driver
+
+    if os.getenv('DOCKERIZED') == 'true':
+        # If running through docker-compose, use the standalone firefox container. See: docker-compose.yml#firefox
+        driver = webdriver.Remote(
+        command_executor='http://firefox:4444/wd/hub',
+        desired_capabilities=ffx_profile.to_capabilities())
+
+        atexit.register(cleanup_selenium)
+    else:
+        driver = webdriver.Firefox(options=ffx_profile)
+        atexit.register(cleanup_selenium)
 
     begin_scrape()
 
